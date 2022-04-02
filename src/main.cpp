@@ -1,7 +1,9 @@
 #include "MPU9250.h"
-
+#include <ESP32Encoder.h>
 #include "BluetoothSerial.h"
+#include <Arduino.h>
 
+#define ENCODER_DO_NOT_USE_INTERRUPTS
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
 #endif
@@ -14,12 +16,18 @@ void backward();
 void motorControl(int speed);
 void PID();
 void stp(int a);
-// Motor A
+
 int kp = 1.5;
 int kd = 0;
 
+ESP32Encoder encoder;
+ESP32Encoder encoder2;
+
+
+
 int last_error = 0;
 
+// Motor A 
 int motor1Pin1 = 4; 
 int motor1Pin2 = 5; 
 int enable1Pin = 13; 
@@ -38,7 +46,6 @@ MPU9250 IMU(Wire,0x68);
 int status;
 double roll , pitch, yaw;
 void setup() {
-
   // sets the pins as outputs:
   pinMode(motor1Pin1, OUTPUT);
   pinMode(motor1Pin2, OUTPUT);
@@ -57,6 +64,29 @@ void setup() {
   // serial to display data
   Serial.begin(115200);
 
+
+  //-----------encoder------------
+  // Enable the weak pull down resistors
+
+	//ESP32Encoder::useInternalWeakPullResistors=DOWN;
+	// Enable the weak pull up resistors
+	ESP32Encoder::useInternalWeakPullResistors=UP;
+
+
+	encoder.attachFullQuad(33, 26);
+
+	encoder2.attachFullQuad(25, 27);
+		
+	// set starting count value after attaching
+	encoder.clearCount();
+  encoder.setCount(0);
+	// clear the encoder's raw count and set the tracked count to zero
+	encoder2.clearCount();
+  encoder2.setCount(0);
+	Serial.println("Encoder Start = " + String((int32_t)encoder.getCount()) + "   " + String((int32_t)encoder2.getCount()));
+  //-----------encoder------------
+
+
   SerialBT.begin("ESP32test"); //Bluetooth device name
   Serial.println("The device started, now you can pair it with bluetooth!");
   while(!Serial) {}
@@ -71,7 +101,23 @@ void setup() {
 }
 
 void loop() {
-  if (SerialBT.available()) {
+  Serial.println("Encoder count = " + String((int32_t)encoder.getCount()) + " " + String((int32_t)encoder2.getCount()));
+	delay(100);
+
+	// every 5 seconds toggle encoder 2
+	/*if (millis() - encoder2lastToggled >= 5000) {
+		if(encoder2Paused) {
+			Serial.println("Resuming Encoder 2");
+			encoder2.resumeCount();
+		} else {
+			Serial.println("Paused Encoder 2");
+			encoder2.pauseCount();
+		}
+
+		encoder2Paused = !encoder2Paused;
+		encoder2lastToggled = millis();
+	}*/
+  /*if (SerialBT.available()) {
     char a = SerialBT.read();
     Serial.println(a);
     if (a == 'F'){
@@ -82,7 +128,7 @@ void loop() {
       stp(1);
     }
   }
-  delay(20);
+  delay(20);*/
 }
 
 void getIMUData(){  

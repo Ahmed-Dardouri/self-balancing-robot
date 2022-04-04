@@ -10,6 +10,8 @@
 
 BluetoothSerial SerialBT;
 
+// Functions
+void minspeed();
 void getIMUData();
 void forward();
 void backward();
@@ -17,13 +19,20 @@ void motorControl(int speed);
 void PID();
 void stp(int a);
 
-int kp = 1.5;
+int kp = 1;
 int kd = 0;
+int ki = 0;
+
+int base = 138;
+int integral;
+
+float gyroll = 0;
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
 
-
+int loop_timer;
+int initial_time;
 
 int last_error = 0;
 
@@ -41,11 +50,14 @@ const int freq = 30000;
 const int pwmChannel = 0;
 const int resolution = 8;
 int dutyCycle = 200;
+
+int i = 0;
 // an MPU9250 object with the MPU-9250 sensor on I2C bus 0 with address 0x68
 MPU9250 IMU(Wire,0x68);
 int status;
 double roll , pitch, yaw;
 void setup() {
+
   // sets the pins as outputs:
   pinMode(motor1Pin1, OUTPUT);
   pinMode(motor1Pin2, OUTPUT);
@@ -55,6 +67,9 @@ void setup() {
   pinMode(motor2Pin2, OUTPUT);
   pinMode(enable2Pin, OUTPUT);
   
+
+  //builtin led
+  pinMode(LED_BUILTIN, OUTPUT);
   // configure LED PWM functionalitites
   ledcSetup(pwmChannel, freq, resolution);
   
@@ -97,38 +112,17 @@ void setup() {
     Serial.println("Check IMU wiring or try cycling power");
     Serial.print("Status: ");
     Serial.println(status);
+  }else{
+      digitalWrite(LED_BUILTIN, HIGH);
   }
+  initial_time = micros();
+  loop_timer = micros() + 500;
+
 }
 
 void loop() {
-  Serial.println("Encoder count = " + String((int32_t)encoder.getCount()) + " " + String((int32_t)encoder2.getCount()));
-	delay(100);
 
-	// every 5 seconds toggle encoder 2
-	/*if (millis() - encoder2lastToggled >= 5000) {
-		if(encoder2Paused) {
-			Serial.println("Resuming Encoder 2");
-			encoder2.resumeCount();
-		} else {
-			Serial.println("Paused Encoder 2");
-			encoder2.pauseCount();
-		}
-
-		encoder2Paused = !encoder2Paused;
-		encoder2lastToggled = millis();
-	}*/
-  /*if (SerialBT.available()) {
-    char a = SerialBT.read();
-    Serial.println(a);
-    if (a == 'F'){
-      motorControl(200);
-    }else if (a == 'B'){
-      motorControl(-200);
-    }else{
-      stp(1);
-    }
-  }
-  delay(20);*/
+  PID();
 }
 
 void getIMUData(){  
@@ -136,13 +130,26 @@ void getIMUData(){
   float accelX = IMU.getAccelX_mss();
   float accelY = IMU.getAccelY_mss();
   float accelZ = IMU.getAccelZ_mss();
-  float gyroX = IMU.getGyroX_rads()/57.3;
-  float gyroY = IMU.getGyroY_rads()/57.3;
-  float gyroZ = IMU.getGyroZ_rads()/57.3;
+  float gyroX = IMU.getGyroX_rads();
+  float gyroY = IMU.getGyroY_rads();
+  float gyroZ = IMU.getGyroZ_rads();
   float magX = IMU.getMagX_uT();
   float magY = IMU.getMagY_uT();
   float magZ = IMU.getMagZ_uT();
 
+
+  /*Serial.print("gyroX"); 
+  Serial.println(gyroX);
+  Serial.print("gyroY"); 
+  Serial.println(gyroY);
+  Serial.print("gyroZ"); 
+  Serial.println(gyroZ);*/
+
+
+
+  float gX = IMU.getGyroX_rads();
+  //Serial.println(gX);
+  gyroll += gX * 0.00003;
 
 //Euler angle from accel
 
@@ -158,9 +165,9 @@ void getIMUData(){
   yaw =  atan2(Yh, Xh);
 
 
-  roll = roll*57.3;
-  pitch = pitch*57.3;
-  yaw = yaw*57.3;
+  roll = roll*57.296;
+  pitch = pitch*57.296;
+  yaw = yaw*57.296;
 
 
 
@@ -177,10 +184,9 @@ void PID(){
   
   getIMUData();
   int error = roll;
-  /*Serial.print("roll  ");
-  Serial.println(roll);*/
-  int ms = 140 * (roll/abs(error)) + kp*error + kd * (error - last_error);
-  if(abs(roll) > 60){
+  integral += ki * (last_error + error)/2;
+  int ms = base * (roll/abs(error)) + kp*error + kd * (error - last_error) + integral;
+  if(abs(roll) > 40){
     if(abs(last_error) > 40){
       ms = 0;
     }
@@ -192,18 +198,20 @@ void PID(){
     }else{
       ms = 255;
     }
+  }else if((abs(ms) - abs(base)) < 10){
+    ms = 0;
   }
   motorControl(ms);
   last_error = error;
 }
 
-void forward(){
+void backward(){
   digitalWrite(motor1Pin1, LOW);
   digitalWrite(motor1Pin2, HIGH); 
   digitalWrite(motor2Pin1, LOW);
   digitalWrite(motor2Pin2, HIGH); 
 }
-void backward(){
+void forward(){
   digitalWrite(motor1Pin1, HIGH);
   digitalWrite(motor1Pin2, LOW); 
   digitalWrite(motor2Pin1, HIGH);
@@ -271,3 +279,42 @@ void loop() {
       Serial.println(distR); 
       delay(300); 
 }*/
+
+
+
+
+void minspeed(){
+  for(int i = 120; i < 160; i++){
+    motorControl(i);
+    delay(200);
+    Serial.println(i);
+  }
+  for(int i = 160; i > 120; i--){
+    motorControl(i);
+    delay(200);
+    Serial.println(i);
+  }
+}
+
+
+
+
+
+
+//-----------bluetooth-------------
+  /*if (SerialBT.available()) {
+    char a = SerialBT.read();
+    Serial.println(a);
+    if (a == 'F'){
+      motorControl(200);
+    }else if (a == 'B'){
+      motorControl(-200);
+    }else{
+      stp(1);
+    }
+  }
+  delay(20);*/
+  //-----------bluetooth-------------
+
+
+  //Serial.println("Encoder count = " + String((int32_t)encoder.getCount()) + " " + String((int32_t)encoder2.getCount()));

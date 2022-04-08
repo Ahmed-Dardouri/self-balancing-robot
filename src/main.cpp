@@ -1,7 +1,8 @@
+
 #include "MPU9250.h"
+#include "Arduino.h"
 #include <ESP32Encoder.h>
 #include "BluetoothSerial.h"
-#include <Arduino.h>
 
 #define ENCODER_DO_NOT_USE_INTERRUPTS
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
@@ -11,6 +12,8 @@
 BluetoothSerial SerialBT;
 
 // Functions
+void print_calibration();
+void getdata();
 void minspeed();
 void getIMUData();
 void forward();
@@ -19,12 +22,20 @@ void motorControl(int speed);
 void PID();
 void stp(int a);
 
-int kp = 1;
-int kd = 0;
+
+int stand_angle = 10;
+int wanted_angle = 0;
+
+int kp = 5;
+int kd = 0.5;
 int ki = 0;
+
+int N = 30;
 
 int base = 138;
 int integral;
+int derivative;
+int proportional;
 
 float gyroll = 0;
 
@@ -52,12 +63,14 @@ const int resolution = 8;
 int dutyCycle = 200;
 
 int i = 0;
-// an MPU9250 object with the MPU-9250 sensor on I2C bus 0 with address 0x68
-MPU9250 IMU(Wire,0x68);
-int status;
-double roll , pitch, yaw;
-void setup() {
 
+float pitch, yaw, roll;
+// mpu object
+MPU9250 mpu;
+
+void print_roll_pitch_yaw();
+
+void setup() {
   // sets the pins as outputs:
   pinMode(motor1Pin1, OUTPUT);
   pinMode(motor1Pin2, OUTPUT);
@@ -76,8 +89,6 @@ void setup() {
   // attach the channel to the GPIO to be controlled
   ledcAttachPin(enable1Pin, pwmChannel);
   ledcAttachPin(enable2Pin, pwmChannel);
-  // serial to display data
-  Serial.begin(115200);
 
 
   //-----------encoder------------
@@ -104,93 +115,131 @@ void setup() {
 
   SerialBT.begin("ESP32test"); //Bluetooth device name
   Serial.println("The device started, now you can pair it with bluetooth!");
-  while(!Serial) {}
-  // start communication with IMU 
-  status = IMU.begin();
-  if (status < 0) {
-    Serial.println("IMU initialization unsuccessful");
-    Serial.println("Check IMU wiring or try cycling power");
-    Serial.print("Status: ");
-    Serial.println(status);
-  }else{
-      digitalWrite(LED_BUILTIN, HIGH);
-  }
-  initial_time = micros();
-  loop_timer = micros() + 500;
 
+
+  Serial.begin(115200);
+  Wire.begin();
+  delay(2000);
+
+  if (!mpu.setup(0x68)) {  // change to your own address
+    while (1) {
+      Serial.println("MPU connection failed. Please check your connection with `connection_check` example.");
+      delay(5000);
+    }
+  }else{
+    digitalWrite(LED_BUILTIN, HIGH);
+  }
+
+  // calibrate anytime you want to
+  /*Serial.println("Accel Gyro calibration will start in 5sec.");
+  Serial.println("Please leave the device still on the flat plane.");
+  mpu.verbose(true);
+  delay(5000);
+  mpu.calibrateAccelGyro();
+
+  Serial.println("Mag calibration will start in 5sec.");
+  Serial.println("Please Wave device in a figure eight until done.");
+  delay(5000);
+  mpu.calibrateMag();
+
+  print_calibration();
+  mpu.verbose(false);*/
 }
 
 void loop() {
-
-  PID();
+  if (mpu.update()) {
+    static uint32_t prev_ms = millis();
+    if (millis() > prev_ms + 25) {
+      PID();
+      prev_ms = millis();
+    }
+  }
 }
 
-void getIMUData(){  
-  IMU.readSensor();
-  float accelX = IMU.getAccelX_mss();
-  float accelY = IMU.getAccelY_mss();
-  float accelZ = IMU.getAccelZ_mss();
-  float gyroX = IMU.getGyroX_rads();
-  float gyroY = IMU.getGyroY_rads();
-  float gyroZ = IMU.getGyroZ_rads();
-  float magX = IMU.getMagX_uT();
-  float magY = IMU.getMagY_uT();
-  float magZ = IMU.getMagZ_uT();
+void getdata() {
+  pitch = mpu.getPitch(); 
+  yaw = mpu.getYaw(); 
+  roll = mpu.getRoll();
+  Serial.print("pitch roll yaw  ");
+  Serial.print(pitch);
+  Serial.print(" | ");
+  Serial.print(roll);
+  Serial.print(" | ");
+  Serial.println(yaw);
+
+}
+
+void print_calibration() {
+    Serial.println("< calibration parameters >");
+    Serial.println("accel bias [g]: ");
+    Serial.print(mpu.getAccBiasX() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
+    Serial.print(", ");
+    Serial.print(mpu.getAccBiasY() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
+    Serial.print(", ");
+    Serial.print(mpu.getAccBiasZ() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
+    Serial.println();
+    Serial.println("gyro bias [deg/s]: ");
+    Serial.print(mpu.getGyroBiasX() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
+    Serial.print(", ");
+    Serial.print(mpu.getGyroBiasY() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
+    Serial.print(", ");
+    Serial.print(mpu.getGyroBiasZ() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
+    Serial.println();
+    Serial.println("mag bias [mG]: ");
+    Serial.print(mpu.getMagBiasX());
+    Serial.print(", ");
+    Serial.print(mpu.getMagBiasY());
+    Serial.print(", ");
+    Serial.print(mpu.getMagBiasZ());
+    Serial.println();
+    Serial.println("mag scale []: ");
+    Serial.print(mpu.getMagScaleX());
+    Serial.print(", ");
+    Serial.print(mpu.getMagScaleY());
+    Serial.print(", ");
+    Serial.print(mpu.getMagScaleZ());
+    Serial.println();
+}
+
+/////////////////////////////////////////////////////////////////
 
 
-  /*Serial.print("gyroX"); 
-  Serial.println(gyroX);
-  Serial.print("gyroY"); 
-  Serial.println(gyroY);
-  Serial.print("gyroZ"); 
-  Serial.println(gyroZ);*/
+/*void setup() {
 
-
-
-  float gX = IMU.getGyroX_rads();
-  //Serial.println(gX);
-  gyroll += gX * 0.00003;
-
-//Euler angle from accel
+  
+  while(!Serial) {}
+  // start communication with IMU 
 
  
-  pitch = atan2 (accelY ,( sqrt ((accelX * accelX) + (accelZ * accelZ))));
-  roll = atan2(-accelX ,( sqrt((accelY * accelY) + (accelZ * accelZ))));
+      
 
-   // yaw from mag
-
-  float Yh = (magY * cos(roll)) - (magZ * sin(roll));
-  float Xh = (magX * cos(pitch))+(magY * sin(roll)*sin(pitch)) + (magZ * cos(roll) * sin(pitch));
-
-  yaw =  atan2(Yh, Xh);
+}*/
 
 
-  roll = roll*57.296;
-  pitch = pitch*57.296;
-  yaw = yaw*57.296;
-
-
-
-  /*Serial.print("pitch"); 
-  Serial.println(pitch);
-  Serial.print("yaw"); 
-  Serial.println(yaw);
-  Serial.print("roll"); 
-  Serial.println(roll);*/
-
-}
 
 void PID(){
   
-  getIMUData();
-  int error = roll;
-  integral += ki * (last_error + error)/2;
-  int ms = base * (roll/abs(error)) + kp*error + kd * (error - last_error) + integral;
-  if(abs(roll) > 40){
-    if(abs(last_error) > 40){
+  getdata();
+  int error = roll - stand_angle - wanted_angle;
+  int s = error - last_error;
+  //integral += ki * (last_error + error)/2;
+  integral += ki * error;
+  //derivative = kd * s;
+  derivative = kd * ((N*s)/(N+s));
+  proportional = kp*error;
+
+  float ms = proportional + derivative + integral;
+  if(roll > 0){
+    ms += base;
+  }else{
+    ms -= base;
+  }
+  if(abs(roll) > 50){
+    if(abs(last_error) > 50){
       ms = 0;
     }
-    
+  }else if(abs(roll) > 25){
+    ms *= 1.15;
   }
   if(abs(ms) > 255){
     if (ms < 0){
@@ -198,8 +247,6 @@ void PID(){
     }else{
       ms = 255;
     }
-  }else if((abs(ms) - abs(base)) < 10){
-    ms = 0;
   }
   motorControl(ms);
   last_error = error;
@@ -226,63 +273,12 @@ void stp(int a){
 }
 void motorControl(int speed){
   if(speed > 0){
-    backward();
-  }else{
     forward();
+  }else{
+    backward();
   }
   ledcWrite(pwmChannel, abs(speed));
 }
-
-/*#include <Arduino.h>
-void countEncoderRA();
-void countEncoderRB();
-
-int encoderRA = 15;
-int encoderRB = 2;
-float R = 40.25;
-float encoder_ticks = 400;
-float precision = 4;
-float distR = 0;
-int encoderRPos = 0;
-int lastEncoderRPos = 0;
-boolean encoderRA_set = HIGH;
-boolean encoderRB_set = HIGH;
-
-float distance_tick = (2*PI*R)/(encoder_ticks*precision);
-
-void countEncoderRA(){
-  encoderRA_set = digitalRead(encoderRA);
-  encoderRPos += (encoderRA_set == encoderRB_set) ? -1 : +1;
-  distR += (encoderRA_set == encoderRB_set) ? -distance_tick : +distance_tick;
-}
-
-void countEncoderRB(){
-  encoderRB_set = digitalRead(encoderRB);
-  encoderRPos += (encoderRA_set != encoderRB_set) ? -1 : +1;
-  distR += (encoderRA_set != encoderRB_set) ? -distance_tick : +distance_tick; 
-}
-
-void setup() {
-  pinMode(encoderRA, INPUT);
-  pinMode(encoderRB, INPUT);
-  digitalWrite(encoderRA, HIGH);
-  digitalWrite(encoderRB, HIGH);
-  attachInterrupt(digitalPinToInterrupt(15), countEncoderRA, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(2), countEncoderRB, CHANGE);
-  Serial.begin(115200);
-}
-
-void loop() {
-      Serial.print("  position    ");
-      Serial.println(encoderRPos);
-      Serial.print("  distance   ");
-      Serial.println(distR); 
-      delay(300); 
-}*/
-
-
-
-
 void minspeed(){
   for(int i = 120; i < 160; i++){
     motorControl(i);
@@ -295,9 +291,6 @@ void minspeed(){
     Serial.println(i);
   }
 }
-
-
-
 
 
 

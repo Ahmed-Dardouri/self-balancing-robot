@@ -23,12 +23,12 @@ void motorControl(int speed, int speed1);
 void PID();
 void stp(int a);
 
-float stand_angle = 0.7;
+float stand_angle = 0;
 float wanted_angle = 0;
 
 float kp = 7;
 float kd = 16;
-float ki = 2.5;
+float ki = 2.6;
 
 int N = 90;
 

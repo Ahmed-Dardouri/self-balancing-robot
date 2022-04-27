@@ -27,18 +27,15 @@ float stand_angle = 0.7;
 float wanted_angle = 0;
 
 float kp = 7;
-float kd = 25;
-float ki = 1;
+float kd = 16;
+float ki = 2.5;
 
 int N = 90;
 
 int lms;
 int rms;
 
-int speed;
-bool clamp = false;
-
-int base = 131;
+int base = 127;
 /*int baseRB = -131;
 int baseLF = 131;
 int baseLB = -131;*/
@@ -271,7 +268,7 @@ void PID(){
       rms = 0;
     }
   }
-  if (abs(error) < 2){
+  if (abs(error) < 1){
     lms = 0;
     rms = 0;
   }

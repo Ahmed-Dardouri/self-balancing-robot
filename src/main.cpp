@@ -3,6 +3,7 @@
 #include "Arduino.h"
 #include <ESP32Encoder.h>
 #include "BluetoothSerial.h"
+#include "string.h"
 
 #define ENCODER_DO_NOT_USE_INTERRUPTS
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
@@ -18,21 +19,30 @@ void minspeed();
 void getIMUData();
 void forward();
 void backward();
-void motorControl(int speed);
+void motorControl(int speed, int speed1);
 void PID();
 void stp(int a);
 
+float stand_angle = 0.7;
+float wanted_angle = 0;
 
-int stand_angle = 10;
-int wanted_angle = 0;
+float kp = 7;
+float kd = 25;
+float ki = 1;
 
-int kp = 5;
-int kd = 0.5;
-int ki = 0;
+int N = 90;
 
-int N = 30;
+int lms;
+int rms;
 
-int base = 138;
+int speed;
+bool clamp = false;
+
+int base = 131;
+/*int baseRB = -131;
+int baseLF = 131;
+int baseLB = -131;*/
+
 int integral;
 int derivative;
 int proportional;
@@ -52,17 +62,19 @@ int motor1Pin1 = 4;
 int motor1Pin2 = 5; 
 int enable1Pin = 13; 
 // Motor B  
-int motor2Pin1 = 19; 
-int motor2Pin2 = 18; 
+int motor2Pin1 = 18; 
+int motor2Pin2 = 19; 
 int enable2Pin = 14; 
 
 // Setting PWM properties
 const int freq = 30000;
 const int pwmChannel = 0;
+const int pwmChannel1 = 1;
 const int resolution = 8;
 int dutyCycle = 200;
 
 int i = 0;
+int o = 0;
 
 float pitch, yaw, roll;
 // mpu object
@@ -85,10 +97,12 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   // configure LED PWM functionalitites
   ledcSetup(pwmChannel, freq, resolution);
+  ledcSetup(pwmChannel1, freq, resolution);
+
   
   // attach the channel to the GPIO to be controlled
   ledcAttachPin(enable1Pin, pwmChannel);
-  ledcAttachPin(enable2Pin, pwmChannel);
+  ledcAttachPin(enable2Pin, pwmChannel1);
 
 
   //-----------encoder------------
@@ -113,7 +127,7 @@ void setup() {
   //-----------encoder------------
 
 
-  SerialBT.begin("ESP32test"); //Bluetooth device name
+  SerialBT.begin("PCD"); //Bluetooth device name
   Serial.println("The device started, now you can pair it with bluetooth!");
 
 
@@ -121,14 +135,11 @@ void setup() {
   Wire.begin();
   delay(2000);
 
-  if (!mpu.setup(0x68)) {  // change to your own address
-    while (1) {
-      Serial.println("MPU connection failed. Please check your connection with `connection_check` example.");
-      delay(5000);
-    }
-  }else{
-    digitalWrite(LED_BUILTIN, HIGH);
+  while (!mpu.setup(0x68)) {
+    Serial.println("MPU connection failed. Please check your connection with `connection_check` example.");
+    delay(500);
   }
+  digitalWrite(LED_BUILTIN, HIGH);
 
   // calibrate anytime you want to
   /*Serial.println("Accel Gyro calibration will start in 5sec.");
@@ -147,13 +158,42 @@ void setup() {
 }
 
 void loop() {
+  /*for(int i = 145; i < 150; i++){
+    motorControl(i,i);
+    delay(50);
+    Serial.println(i);
+  }
+  for(int i = -145; i > -150; i--){
+    motorControl(i,i);
+    delay(50);
+    Serial.println(i);
+  }*/
+ 
   if (mpu.update()) {
     static uint32_t prev_ms = millis();
     if (millis() > prev_ms + 25) {
+      if (SerialBT.available()) {
+        char a = SerialBT.read();
+        float b = (int)(a) - 48 ;
+
+        if (o==0 ) {
+        kp = b;
+        }
+        else if (o==1)
+        {
+          kp +=  (float) b*0.1;
+          //Serial.println(kp);
+        }
+        o++;
+      }
+      else {
+        o = 0;
+      }
       PID();
       prev_ms = millis();
     }
   }
+
 }
 
 void getdata() {
@@ -201,24 +241,7 @@ void print_calibration() {
     Serial.println();
 }
 
-/////////////////////////////////////////////////////////////////
-
-
-/*void setup() {
-
-  
-  while(!Serial) {}
-  // start communication with IMU 
-
- 
-      
-
-}*/
-
-
-
 void PID(){
-  
   getdata();
   int error = roll - stand_angle - wanted_angle;
   int s = error - last_error;
@@ -229,26 +252,45 @@ void PID(){
   proportional = kp*error;
 
   float ms = proportional + derivative + integral;
-  if(roll > 0){
-    ms += base;
-  }else{
-    ms -= base;
+  
+  if((abs(ms) + base > 235) && (ms * error > 0)){
+    ms -= integral;
+    integral = 0;
   }
+  if(error > 0){
+    lms = ms + base;
+    rms = ms + base;
+  }else{
+    lms = ms - base;
+    rms = ms - base;
+  }
+
   if(abs(roll) > 50){
     if(abs(last_error) > 50){
-      ms = 0;
+      lms = 0;
+      rms = 0;
     }
-  }else if(abs(roll) > 25){
-    ms *= 1.15;
   }
-  if(abs(ms) > 255){
-    if (ms < 0){
-      ms = -255;
+  if (abs(error) < 2){
+    lms = 0;
+    rms = 0;
+  }
+  if(abs(lms) > 255){
+    if (lms < 0){
+      lms = -255;
     }else{
-      ms = 255;
+      lms = 255;
     }
   }
-  motorControl(ms);
+  if(abs(rms) > 255){
+    if (rms < 0){
+      rms = -255;
+    }else{
+      rms = 255;
+    }
+  }
+  
+  motorControl(rms,lms);
   last_error = error;
 }
 
@@ -271,22 +313,24 @@ void stp(int a){
   digitalWrite(motor2Pin2, LOW);
   delay(a); 
 }
-void motorControl(int speed){
-  if(speed > 0){
+void motorControl(int speed, int speed1){
+  if(speed > 0) {
     forward();
   }else{
     backward();
   }
   ledcWrite(pwmChannel, abs(speed));
+  ledcWrite(pwmChannel1, abs(speed1));
+
 }
 void minspeed(){
   for(int i = 120; i < 160; i++){
-    motorControl(i);
+    motorControl(i,i);
     delay(200);
     Serial.println(i);
   }
-  for(int i = 160; i > 120; i--){
-    motorControl(i);
+  for(int i = -120; i > -160; i--){
+    motorControl(i,i);
     delay(200);
     Serial.println(i);
   }
@@ -295,7 +339,7 @@ void minspeed(){
 
 
 //-----------bluetooth-------------
-  /*if (SerialBT.available()) {
+ /* if (SerialBT.available()) {
     char a = SerialBT.read();
     Serial.println(a);
     if (a == 'F'){

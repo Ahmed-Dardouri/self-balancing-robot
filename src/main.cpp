@@ -25,6 +25,8 @@ void stp(int a);
 float stand_angle = 4;
 float wanted_angle = 0;
 
+int turnSpeed = 10;
+
 float kp = 6;
 float kd = 12;
 float ki = 2.1;
@@ -70,6 +72,9 @@ MPU9250 mpu;
 // angles of the robot
 float pitch, yaw, roll;
 
+//bluetooth input
+char a;
+
 void setup() {
   // sets the pins as outputs:
   pinMode(motor1Pin1, OUTPUT);
@@ -112,8 +117,10 @@ void loop() {
   if (mpu.update()) {
     static uint32_t prev_ms = millis();
     if (millis() > prev_ms + 25) {
+      
+      PID();
       if (SerialBT.available()) {
-        char a = SerialBT.read();
+        a = SerialBT.read();
         if (a == 'S'){
           wanted_angle = 0;
           digitalWrite(LED_BUILTIN, HIGH);
@@ -123,16 +130,39 @@ void loop() {
           if(wanted_angle < 1.8){
             wanted_angle += 0.05;
           }
-          
         }
         if (a == 'B'){
           digitalWrite(LED_BUILTIN, LOW);
           if(wanted_angle > -1.8){
             wanted_angle -= 0.05;
           }
+        }if (a == 'R'){
+          digitalWrite(LED_BUILTIN, LOW);
+          lms += turnSpeed;
+          rms -= turnSpeed;
+        }if (a == 'L'){
+          digitalWrite(LED_BUILTIN, LOW);
+          lms -= turnSpeed;
+          rms += turnSpeed;
         }
       }
-      PID();
+      
+      if(abs(lms) > 255){
+        if (lms < 0){
+          lms = -255;
+        }else{
+          lms = 255;
+        }
+      }
+      if(abs(rms) > 255){
+        if (rms < 0){
+          rms = -255;
+        }else{
+          rms = 255;
+        }
+  }
+  
+  motorControl(rms,lms);
       prev_ms = millis();
     }
   }
@@ -215,22 +245,6 @@ void PID(){
     lms = 0;
     rms = 0;
   }
-  if(abs(lms) > 255){
-    if (lms < 0){
-      lms = -255;
-    }else{
-      lms = 255;
-    }
-  }
-  if(abs(rms) > 255){
-    if (rms < 0){
-      rms = -255;
-    }else{
-      rms = 255;
-    }
-  }
-  
-  motorControl(rms,lms);
   last_error = error;
 }
 void backward(){
